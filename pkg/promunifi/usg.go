@@ -34,6 +34,18 @@ type usg struct {
 	UplinkSpeed    *prometheus.Desc
 	UplinkMaxSpeed *prometheus.Desc
 	UplinkUptime   *prometheus.Desc
+
+	// Uplink topology detail. The controller sends uplink_mac, the parent
+	// device name and the uplink type on every device, and the unifi library
+	// already parses them into unifi.Uplink -- they were simply never
+	// exported. These carry them as labels so mesh/backhaul topology can be
+	// reconstructed from Prometheus alone.
+	UplinkInfo   *prometheus.Desc
+	UplinkUp     *prometheus.Desc
+	UplinkTxRate      *prometheus.Desc
+	UplinkRxRate      *prometheus.Desc
+	UplinkTxBytesRate *prometheus.Desc
+	UplinkRxBytesRate *prometheus.Desc
 	Runtime        *prometheus.Desc
 	Rundate        *prometheus.Desc
 	XputDownload   *prometheus.Desc
@@ -42,6 +54,10 @@ type usg struct {
 
 func descUSG(ns string) *usg {
 	labels := []string{"port", "site_name", "name", "source", "tag"}
+	uplinkLabels := []string{
+		"site_name", "name", "source", "tag",
+		"uplink_mac", "uplink_device", "uplink_name", "uplink_type", "uplink_media",
+	}
 
 	return &usg{
 		WanRxPackets:   prometheus.NewDesc(ns+"wan_receive_packets_total", "WAN Receive Packets Total", labels, nil),
@@ -69,6 +85,23 @@ func descUSG(ns string) *usg {
 		UplinkSpeed:    prometheus.NewDesc(ns+"uplink_speed_mbps", "Uplink Speed", labels, nil),
 		UplinkMaxSpeed: prometheus.NewDesc(ns+"uplink_max_speed_mbps", "Uplink Max Speed", labels, nil),
 		UplinkUptime:   prometheus.NewDesc(ns+"uplink_uptime_seconds", "Uplink Uptime", labels, nil),
+		UplinkInfo: prometheus.NewDesc(ns+"uplink_info",
+			"Device uplink topology: 1 when up, labelled with the parent device and link type",
+			uplinkLabels, nil),
+		UplinkUp: prometheus.NewDesc(ns+"uplink_up",
+			"Uplink state: 1 when the link is up", uplinkLabels, nil),
+		UplinkTxBytesRate: prometheus.NewDesc(ns+"uplink_tx_bytes_rate",
+			"Uplink transmit throughput in bytes/sec (tx_bytes-r)", uplinkLabels, nil),
+		UplinkRxBytesRate: prometheus.NewDesc(ns+"uplink_rx_bytes_rate",
+			"Uplink receive throughput in bytes/sec (rx_bytes-r)", uplinkLabels, nil),
+		UplinkTxRate: prometheus.NewDesc(ns+"uplink_tx_rate",
+			"Uplink transmit rate as reported by the controller (tx_rate). "+
+				"Populated on wireless uplinks where the byte-rate fields are not.",
+			uplinkLabels, nil),
+		UplinkRxRate: prometheus.NewDesc(ns+"uplink_rx_rate",
+			"Uplink receive rate as reported by the controller (rx_rate). "+
+				"Populated on wireless uplinks where the byte-rate fields are not.",
+			uplinkLabels, nil),
 		Latency:        prometheus.NewDesc(ns+"speedtest_latency_seconds", "Speedtest Latency", labels, nil),
 		Runtime:        prometheus.NewDesc(ns+"speedtest_runtime_seconds", "Speedtest Run Time", labels, nil),
 		Rundate:        prometheus.NewDesc(ns+"speedtest_rundate_seconds", "Speedtest Run Date", labels, nil),
@@ -134,6 +167,16 @@ func (u *promUnifi) exportDeviceUplink(r report, labels []string, ul unifi.Uplin
 		{u.USG.UplinkMaxSpeed, gauge, ul.MaxSpeed, labelUL},
 		{u.USG.UplinkUptime, gauge, ul.Uptime, labelUL},
 	})
+
+	// uplink_mac is the parent device; Mac is the local interface. Prefer
+	// the parent so mesh backhaul resolves to the AP it is homed to.
+	parentMac := ul.UplinkMac
+	if parentMac == "" {
+		parentMac = ul.Mac
+	}
+	u.exportUplinkDetail(r, labels, parentMac, ul.UplinkDeviceName, ul.Name,
+		ul.Type, ul.Media, ul.Up.Val, ul.TxRate, ul.RxRate,
+		ul.TxBytesR, ul.RxBytesR)
 }
 
 // Gateway Stats.
@@ -145,6 +188,20 @@ func (u *promUnifi) exportUSGstats(r report, labels []string, gw *unifi.Gw, st u
 	} else {
 		sourceInterface = "all"
 	}
+
+	// The uplink is independent of gateway stats. Devices the controller
+	// types as udm but which are really access points (U7 mesh APs) have a
+	// nil Gw, so exporting the uplink after this guard silently dropped
+	// every mesh backhaul link.
+	// uplink_mac is the parent device; Mac is the local interface. Prefer
+	// the parent so mesh backhaul resolves to the AP it is homed to.
+	parentMac := ul.UplinkMac
+	if parentMac == "" {
+		parentMac = ul.Mac
+	}
+	u.exportUplinkDetail(r, labels, parentMac, ul.UplinkDeviceName, ul.Name,
+		ul.Type, ul.Media, ul.Up.Val, ul.TxRate, ul.RxRate,
+		ul.TxBytesR, ul.RxBytesR)
 
 	if gw == nil {
 		return
@@ -170,6 +227,7 @@ func (u *promUnifi) exportUSGstats(r report, labels []string, gw *unifi.Gw, st u
 		{u.USG.XputDownload, gauge, st.XputDownload, labelWan},
 		{u.USG.XputUpload, gauge, st.XputUpload, labelWan},
 	})
+
 }
 
 // WAN Stats.

@@ -241,6 +241,11 @@ func (u *promUnifi) exportUAP(r report, d *unifi.UAP) {
 			{u.USG.UplinkSpeed, gauge, d.Uplink.Speed, labelUL},
 			{u.USG.UplinkMaxSpeed, gauge, d.Uplink.MaxSpeed, labelUL},
 		})
+		u.exportUplinkDetail(r, labels, d.Uplink.UplinkMac, "", d.Uplink.Name,
+			d.Uplink.Type, "", d.Uplink.Up.Val,
+			// The UAP uplink struct carries no tx_rate/rx_rate fields.
+			unifi.FlexInt{}, unifi.FlexInt{},
+			d.Uplink.TxBytesR, d.Uplink.RxBytesR)
 	})
 }
 

@@ -101,6 +101,12 @@ func (u *promUnifi) exportTopology(r report, t *unifi.Topology) {
 			if e.ExperienceScore.Val > 0 {
 				r.send([]*metric{{u.Topology.LinkExperienceScore, gauge, e.ExperienceScore.Val, linkLabels}})
 			}
+
+			// Wireless edges carry a rate too; upstream only emitted this in
+			// the WIRED branch, so wireless backhaul rates never appeared.
+			if e.RateMbps.Val > 0 {
+				r.send([]*metric{{u.Topology.LinkRateMbps, gauge, e.RateMbps.Val, linkLabels}})
+			}
 		}
 	}
 
